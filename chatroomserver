@@ -1,5 +1,4 @@
-package chat_room;
-
+package chatroom;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -9,37 +8,22 @@ import java.net.Socket;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
-
 public class MultiRoomChatServer {
-    public static final int PORT = 12345;
-
-    // Danh sách các phòng mặc định do Server cung cấp
-    private static final List<String> DEFAULT_ROOMS = Arrays.asList("Study", "Game", "TraiNghiệm");
-
-    // Quản lý các phòng chat: Key = Tên phòng, Value = Danh sách các Client trong phòng đó
     private static final Map<String, List<ClientHandler>> rooms = new ConcurrentHashMap<>();
-
-    // Định dạng thời gian gửi tin nhắn [HH:mm:ss]
-    private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss");
-
+    private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern(ChatConstants.TIME_PATTERN);
     public static void main(String[] args) {
         System.out.println("=================================================================");
         System.out.println("      HỆ THỐNG CHAT NHÓM ĐA PHÒNG NÂNG CAO QUA TCP               ");
         System.out.println("=================================================================");
-
-        // Khởi tạo các phòng mặc định
-        for (String room : DEFAULT_ROOMS) {
+        for (String room : ChatConstants.DEFAULT_ROOMS) {
             rooms.put(room, new CopyOnWriteArrayList<>());
         }
-
-        System.out.println("Server đang lắng nghe kết nối tại cổng " + PORT + "...");
-
-        try (ServerSocket serverSocket = new ServerSocket(PORT)) {
+        System.out.println("Server đang lắng nghe kết nối tại cổng " + ChatConstants.SERVER_PORT + "...");
+        try (ServerSocket serverSocket = new ServerSocket(ChatConstants.SERVER_PORT)) {
             while (true) {
                 Socket clientSocket = serverSocket.accept();
                 System.out.println("\n[+] Client mới kết nối từ: " + clientSocket.getRemoteSocketAddress());
@@ -50,7 +34,6 @@ public class MultiRoomChatServer {
             System.err.println("Lỗi Server: " + e.getMessage());
         }
     }
-
     public static synchronized String getRoomListString() {
         StringBuilder sb = new StringBuilder("\n=====================================\n");
         sb.append("   DANH SÁCH PHÒNG CHAT HỆ THỐNG\n");
@@ -65,25 +48,20 @@ public class MultiRoomChatServer {
         sb.append("👉 Nhập TÊN PHÒNG hoặc SỐ THỨ TỰ phòng để tham gia (hoặc tự nhập tên phòng mới):\n");
         return sb.toString();
     }
-
     private static class ClientHandler implements Runnable {
         private final Socket socket;
         private BufferedReader in;
         private PrintWriter out;
         private String clientName;
         private String currentRoom;
-
         public ClientHandler(Socket socket) {
             this.socket = socket;
         }
-
         @Override
         public void run() {
             try {
                 in = new BufferedReader(new InputStreamReader(socket.getInputStream(), "UTF-8"));
                 out = new PrintWriter(socket.getOutputStream(), true);
-
-                // 1. Nhập Tên Client
                 out.println("CHAO_MUNG: Vui lòng nhập TÊN của bạn:");
                 clientName = in.readLine();
                 if (clientName == null || clientName.trim().isEmpty()) {
@@ -91,30 +69,23 @@ public class MultiRoomChatServer {
                 }
                 clientName = clientName.trim();
                 System.out.println("Client thiết lập tên: " + clientName);
-
-                // 2. Vòng lặp quản lý chọn phòng và chat
                 while (true) {
                     out.println(getRoomListString());
-
                     String inputChoice = in.readLine();
-                    if (inputChoice == null || "/exit".equalsIgnoreCase(inputChoice.trim())) {
+                    if (inputChoice == null || ChatConstants.CMD_EXIT.equalsIgnoreCase(inputChoice.trim())) {
                         break;
                     }
-
                     inputChoice = inputChoice.trim();
                     if (inputChoice.isEmpty()) {
                         continue;
                     }
-
                     String selectedRoom = resolveRoomName(inputChoice);
                     joinRoom(selectedRoom);
-
                     boolean stayInRoom = handleRoomChat();
                     if (!stayInRoom) {
                         break;
                     }
                 }
-
             } catch (IOException e) {
                 System.out.println("Client '" + clientName + "' đã ngắt kết nối đột ngột.");
             } finally {
@@ -125,7 +96,6 @@ public class MultiRoomChatServer {
                 System.out.println("[-] Đã dọn dẹp kết nối của Client: " + clientName);
             }
         }
-
         private String resolveRoomName(String choice) {
             List<String> roomNames = new ArrayList<>(rooms.keySet());
             try {
@@ -136,60 +106,52 @@ public class MultiRoomChatServer {
             } catch (NumberFormatException ignored) {}
             return choice;
         }
-
         private void joinRoom(String roomName) {
             currentRoom = roomName;
             rooms.putIfAbsent(currentRoom, new CopyOnWriteArrayList<>());
             rooms.get(currentRoom).add(this);
-
             System.out.println("👥 " + clientName + " đã tham gia phòng '" + currentRoom + "'");
             out.println("\n✅ Bạn đã tham gia thành công phòng: [" + currentRoom + "]");
             sendHelpMenu();
-
             broadcastToRoom("[" + getTimestamp() + "] [HỆ THỐNG]: " + clientName + " đã tham gia phòng!", false);
         }
-
         private void sendHelpMenu() {
             out.println("-----------------------------------------------------------------");
-            out.println("💡 DÁNH SÁCH CÁC CÂU LỆNH HỖ TRỢ:");
+            out.println("💡 DANH SÁCH CÁC CÂU LỆNH HỖ TRỢ:");
             out.println("  • Gõ tin nhắn bình thường để chat với mọi người trong phòng.");
-            out.println("  • /list                  : Xem danh sách thành viên trong phòng hiện tại.");
-            out.println("  • /pm <tên_user> <nội_dung> : Gửi tin nhắn riêng (Private Message) cho 1 bạn.");
-            out.println("  • /help                  : Xem lại menu trợ giúp.");
-            out.println("  • /quit                  : Rời phòng hiện tại và quay lại chọn phòng khác.");
-            out.println("  • /exit                  : Ngắt kết nối và thoát hệ thống.");
+            out.println("  • " + ChatConstants.CMD_LIST + "                  : Xem danh sách thành viên trong phòng hiện tại.");
+            out.println("  • " + ChatConstants.CMD_PM + " <tên_user> <nội_dung> : Gửi tin nhắn riêng (Private Message) cho 1 bạn.");
+            out.println("  • " + ChatConstants.CMD_HELP + "                  : Xem lại menu trợ giúp.");
+            out.println("  • " + ChatConstants.CMD_QUIT + "                  : Rời phòng hiện tại và quay lại chọn phòng khác.");
+            out.println("  • " + ChatConstants.CMD_EXIT + "                  : Ngắt kết nối và thoát hệ thống.");
             out.println("-----------------------------------------------------------------");
         }
-
         private boolean handleRoomChat() throws IOException {
             String message;
             while ((message = in.readLine()) != null) {
                 message = message.trim();
                 if (message.isEmpty()) continue;
-
-                if ("/quit".equalsIgnoreCase(message)) {
+                if (ChatConstants.CMD_QUIT.equalsIgnoreCase(message)) {
                     out.println("\n🔄 Bạn đã rời phòng [" + currentRoom + "].");
                     leaveCurrentRoom();
                     return true;
-                } else if ("/exit".equalsIgnoreCase(message)) {
+                } else if (ChatConstants.CMD_EXIT.equalsIgnoreCase(message)) {
                     out.println("\n👋 Cảm ơn bạn đã sử dụng hệ thống Chat. Tạm biệt!");
                     leaveCurrentRoom();
                     return false;
-                } else if ("/help".equalsIgnoreCase(message)) {
+                } else if (ChatConstants.CMD_HELP.equalsIgnoreCase(message)) {
                     sendHelpMenu();
-                } else if ("/list".equalsIgnoreCase(message)) {
+                } else if (ChatConstants.CMD_LIST.equalsIgnoreCase(message)) {
                     sendUserListInRoom();
-                } else if (message.startsWith("/pm ")) {
+                } else if (message.startsWith(ChatConstants.CMD_PM + " ")) {
                     handlePrivateMessage(message);
                 } else {
-                    // Chat nhóm thông thường kèm Timestamp
                     String formattedMsg = "[" + getTimestamp() + "] " + clientName + ": " + message;
                     broadcastToRoom(formattedMsg, true);
                 }
             }
             return false;
         }
-
         private void sendUserListInRoom() {
             if (currentRoom == null || !rooms.containsKey(currentRoom)) return;
             List<ClientHandler> members = rooms.get(currentRoom);
@@ -199,18 +161,14 @@ public class MultiRoomChatServer {
             }
             out.println(sb.toString());
         }
-
         private void handlePrivateMessage(String rawInput) {
-            // Cú pháp: /pm <tên_user> <nội_dung>
             String[] parts = rawInput.split(" ", 3);
             if (parts.length < 3) {
                 out.println("⚠️ Cú pháp không hợp lệ! Sử dụng: /pm <tên_user> <nội_dung>");
                 return;
             }
-
             String targetName = parts[1].trim();
             String pmContent = parts[2].trim();
-
             ClientHandler targetClient = findClientInCurrentRoom(targetName);
             if (targetClient == null) {
                 out.println("❌ Không tìm thấy người dùng '" + targetName + "' trong phòng hiện tại!");
@@ -222,7 +180,6 @@ public class MultiRoomChatServer {
                 out.println("🔒 [TIN NHẮN RIÊNG] [" + time + "] tới " + targetName + ": " + pmContent);
             }
         }
-
         private ClientHandler findClientInCurrentRoom(String name) {
             if (currentRoom == null || !rooms.containsKey(currentRoom)) return null;
             for (ClientHandler client : rooms.get(currentRoom)) {
@@ -232,7 +189,6 @@ public class MultiRoomChatServer {
             }
             return null;
         }
-
         private void leaveCurrentRoom() {
             if (currentRoom != null && rooms.containsKey(currentRoom)) {
                 rooms.get(currentRoom).remove(this);
@@ -241,17 +197,14 @@ public class MultiRoomChatServer {
                 currentRoom = null;
             }
         }
-
         private void broadcastToRoom(String msg, boolean includeSelf) {
             if (currentRoom == null || !rooms.containsKey(currentRoom)) return;
-
             for (ClientHandler client : rooms.get(currentRoom)) {
                 if (includeSelf || client != this) {
                     client.out.println(msg);
                 }
             }
         }
-
         private String getTimestamp() {
             return LocalTime.now().format(TIME_FORMATTER);
         }
